@@ -28,6 +28,7 @@ int main(int argc,char*argv[])
     events.events = EPOLLIN;
     events.data.fd = sockfd;
     epoll_ctl(epfd,EPOLL_CTL_ADD,sockfd,&events);
+
     char buf[4096];
     Conn_t conn[1024];
     time_t now;
@@ -40,12 +41,12 @@ int main(int argc,char*argv[])
     }
     int curidx = 0;
     while(1){
-        struct epoll_event readySet[1024];
-        int readyNum = epoll_wait(epfd,readySet,1024,1000);
+        struct epoll_event readySet[1024];//就绪集合
+        int readyNum = epoll_wait(epfd,readySet,1024,1000);//就序集合的数量
         now = time(NULL);
         printf("now = %s\n",ctime(&now));
-        for(int i=0;i<readyNum;i++){
-            if(readySet[i].data.fd == sockfd){
+        for(int i=0;i<readyNum;i++){//遍历就绪集合
+            if(readySet[i].data.fd == sockfd){//有新客户端接入
                 int netfd = accept(sockfd,NULL,NULL);
                 printf("id = %d,netfd = %d\n",curidx,netfd);
                 conn[curidx].isAlive=1;
@@ -54,9 +55,9 @@ int main(int argc,char*argv[])
                 fdtoidx[netfd] = curidx;
                 events.events = EPOLLIN;
                 events.data.fd = netfd;
-                epoll_ctl(epfd,EPOLL_CTL_ADD,netfd,&events);
+                epoll_ctl(epfd,EPOLL_CTL_ADD,netfd,&events);//监听接入客户端的netfd
                 curidx++;
-            }else{
+            }else{//已接入的客户端发送消息
                 int netfd = readySet[i].data.fd;
                 bzero(buf,sizeof(buf));
                 ssize_t sret = recv(netfd,buf,sizeof(buf),0);
@@ -72,7 +73,7 @@ int main(int argc,char*argv[])
                 int idx = fdtoidx[netfd];
                 conn[idx].lastActivate = time(NULL);//活跃时间重置
                 for(int j=0;j<curidx;j++){
-                    if(conn[j].isAlive==1&&conn[j].netfd!=netfd){
+                    if(conn[j].isAlive==1&&conn[j].netfd!=netfd){//只给活跃用户和除自己之外的客户端发送消息
                         send(conn[j].netfd,buf,strlen(buf),0);
                     }
                 }
