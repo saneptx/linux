@@ -60,7 +60,7 @@ int main(int argc,char*argv[])
                 printf("来自对方的消息：%s",buf);
             }else if(netfd != -1 && readyEvents[i].data.fd == STDIN_FILENO){
                 bzero(buf,sizeof(buf));
-                ssize_t sret = read(STDIN_FILENO,buf,sizeof(buf));
+                read(STDIN_FILENO,buf,sizeof(buf));
                 send(netfd,buf,strlen(buf),0);
             }
             

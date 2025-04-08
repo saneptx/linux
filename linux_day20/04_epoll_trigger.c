@@ -1,4 +1,4 @@
-///01_epoll_sever.c
+///04_epoll_trigger.c
 #include <func.h>
 
 int main(int argc,char*argv[])
@@ -24,22 +24,21 @@ int main(int argc,char*argv[])
     int netfd = accept(sockfd,NULL,NULL);
     printf("连接已建立！\n");
 
-    char buf[4096]={0};
+    char buf[3]={0};
     int epfd = epoll_create(1);//创建epoll文件对象
     //设置监听
-    struct epoll_event events; //什么情况就绪？就绪了如何处理？
+    struct epoll_event events; //什么情况就绪？就绪如何处理？
     events.events = EPOLLIN;//读就绪
     events.data.fd = STDIN_FILENO;//设置就绪时将STDIN_FILENO放入就绪队列
     epoll_ctl(epfd,EPOLL_CTL_ADD,STDIN_FILENO,&events);
-    events.events = EPOLLIN;
+    events.events = EPOLLIN|EPOLLET;//设置边缘触发
     events.data.fd = netfd;
     epoll_ctl(epfd,EPOLL_CTL_ADD,netfd,&events);
 
     while(1){
-
         struct epoll_event readyEvents[2];
         int readyNum = epoll_wait(epfd,readyEvents,2,-1);
-
+        printf("epoll ready！\n");
         for(int i=0;i<readyNum;i++){
             if(readyEvents[i].data.fd==STDIN_FILENO){
                 bzero(buf,sizeof(buf));
@@ -51,7 +50,7 @@ int main(int argc,char*argv[])
                 send(netfd,buf,strlen(buf),0);
             }else if(readyEvents[i].data.fd==netfd){
                 bzero(buf,sizeof(buf));
-                ssize_t sret = recv(netfd,buf,sizeof(buf),0);
+                ssize_t sret = recv(netfd,buf,2,0);
                 if(sret == 0){
                     break;
                 }

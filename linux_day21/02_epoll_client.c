@@ -12,7 +12,7 @@ int main(int argc,char*argv[])
     addr.sin_addr.s_addr = inet_addr(argv[1]);
     int ret = connect(sockfd,(struct sockaddr *)&addr,sizeof(addr));
     ERROR_CHECK(ret,-1,"connect");
-    printf("杩炴帴宸插缓绔嬶紒\n");
+    printf("连接已建立\n");
     fd_set rdset;
     char buf[4096] = {0};
     while(1){
@@ -31,7 +31,7 @@ int main(int argc,char*argv[])
             if(sret == 0){
                 break;
             }
-            printf("鏉ヨ嚜瀵规柟鐨勬秷鎭細%s",buf);
+            printf("来自对方的消息：%s",buf);
         }
     }
     close(sockfd);
