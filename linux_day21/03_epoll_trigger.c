@@ -1,9 +1,9 @@
-///04_epoll_trigger.c
+///03_epoll_trigger.c
 #include <func.h>
 
 int main(int argc,char*argv[])
 {
-    // ./01_epoll_sever.c 127.0.0.1 1234
+    // ./03_epoll_trigger 127.0.0.1 1234
     ARGS_CHECK(argc,3);
 
     int sockfd = socket(AF_INET,SOCK_STREAM,0);
@@ -27,11 +27,11 @@ int main(int argc,char*argv[])
     char buf[3]={0};
     int epfd = epoll_create(1);//创建epoll文件对象
     //设置监听
-    struct epoll_event events; 
-    events.events = EPOLLIN;
-    events.data.fd = STDIN_FILENO;
+    struct epoll_event events; //什么情况就绪？就绪如何处理？
+    events.events = EPOLLIN;//读就绪
+    events.data.fd = STDIN_FILENO;//设置就绪时将STDIN_FILENO放入就绪队列
     epoll_ctl(epfd,EPOLL_CTL_ADD,STDIN_FILENO,&events);
-    events.events = EPOLLIN|EPOLLET;
+    events.events = EPOLLIN|EPOLLET;//设置边缘触发
     events.data.fd = netfd;
     epoll_ctl(epfd,EPOLL_CTL_ADD,netfd,&events);
 
@@ -50,11 +50,16 @@ int main(int argc,char*argv[])
                 send(netfd,buf,strlen(buf),0);
             }else if(readyEvents[i].data.fd==netfd){
                 bzero(buf,sizeof(buf));
-                ssize_t sret = recv(netfd,buf,2,0);
-                if(sret == 0){
-                    break;
+                while(1){
+                    ssize_t sret = recv(netfd,buf,2,MSG_DONTWAIT);
+                    if(sret==-1||sret==0){
+                        //sret==-1缓冲区读完
+                        //sret==0客户端断开连接
+                        break;
+                    }
+                    printf("recv:%s\n",buf);
                 }
-                printf("recv:%s",buf);
+                
             }
         }
     }

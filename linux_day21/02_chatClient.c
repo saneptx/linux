@@ -1,9 +1,9 @@
-///02_epoll_client.c
+///02_chatClient.c
 #include <func.h>
 
 int main(int argc,char*argv[])
 {
-    // ./02_epoll_client 127.0.0.1 1234
+    // ./02_chatClient 127.0.0.1 1234
     ARGS_CHECK(argc,3);
     int sockfd = socket(AF_INET,SOCK_STREAM,0);
     struct sockaddr_in addr;
@@ -12,7 +12,7 @@ int main(int argc,char*argv[])
     addr.sin_addr.s_addr = inet_addr(argv[1]);
     int ret = connect(sockfd,(struct sockaddr *)&addr,sizeof(addr));
     ERROR_CHECK(ret,-1,"connect");
-    printf("连接已建立\n");
+    printf("connected\n");
     fd_set rdset;
     char buf[4096] = {0};
     while(1){
@@ -29,9 +29,10 @@ int main(int argc,char*argv[])
             bzero(buf,sizeof(buf));
             ssize_t sret = recv(sockfd,buf,sizeof(buf),0);
             if(sret == 0){
+                printf("disconnected!\n");
                 break;
             }
-            printf("来自对方的消息：%s",buf);
+            printf("recv:%s",buf);
         }
     }
     close(sockfd);
