@@ -4942,7 +4942,7 @@ int main(int argc,char*argv[])
 
 `wait()`可以获得进程的退出状态
 
-~~~
+~~~c
 //用于从 wait() 或 waitpid() 返回的 status 值中提取子进程的状态信息。
 WIFEXITED(stat_val):判断子进程是否正常退出（即通过 exit() 或 return）
 	返回非零值（通常是 true）：表示子进程正常退出。
@@ -8158,7 +8158,7 @@ int main(int argc,char*argv[])
 }
 ~~~
 
-实现聊天室：
+#### 用select实现聊天室
 
 ~~~c
 //1_chatGroup_server.c
@@ -8505,4 +8505,372 @@ int main(int argc,char*argv[])
     return 0;
 }
 ~~~
+
+#### 非阻塞设置
+
+```c
+#include <unistd.h>
+#include <fcntl.h>
+int fcntl(int fd, int cmd, ... /* arg */ );
+/*
+只需了解该寒舍设置非阻塞这一项功能即可
+*/
+```
+
+示例：
+
+~~~c
+#include <unistd.h>
+#include <fcntl.h>
+
+int set_nonblocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1) {
+        return -1;  // 获取当前标志失败
+    }
+    
+    flags |= O_NONBLOCK;  // 添加非阻塞标志
+    if (fcntl(fd, F_SETFL, flags) == -1) {
+        return -1;  // 设置新标志失败
+    }
+    
+    return 0;  // 成功
+}
+~~~
+
+#### epoll的触发方式
+
+**只要缓冲区中有数据就触发epoll称为水平触发。**例如：
+
+~~~c
+///04_epoll_trigger.c
+#include <func.h>
+
+int main(int argc,char*argv[])
+{
+    // ./04_epoll_trigger.c 127.0.0.1 1234
+    ARGS_CHECK(argc,3);
+
+    int sockfd = socket(AF_INET,SOCK_STREAM,0);
+    struct sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(atoi(argv[2]));
+    serverAddr.sin_addr.s_addr = inet_addr(argv[1]);
+
+    int reuse = 1;
+    int ret = setsockopt(sockfd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+    ERROR_CHECK(ret,-1,"setsockopt");
+
+    ret = bind(sockfd,(struct sockaddr *)&serverAddr,sizeof(serverAddr));
+    ERROR_CHECK(ret,-1,"bind");
+
+    listen(sockfd,50);
+
+    int netfd = accept(sockfd,NULL,NULL);
+    printf("连接已建立！\n");
+
+    char buf[3]={0};
+    int epfd = epoll_create(1);//创建epoll文件对象
+    //设置监听
+    struct epoll_event events; //什么情况就绪？就绪如何处理？
+    events.events = EPOLLIN;//读就绪
+    events.data.fd = STDIN_FILENO;//设置就绪时将STDIN_FILENO放入就绪队列
+    epoll_ctl(epfd,EPOLL_CTL_ADD,STDIN_FILENO,&events);
+    events.events = EPOLLIN;//默认水平触发
+    events.data.fd = netfd;
+    epoll_ctl(epfd,EPOLL_CTL_ADD,netfd,&events);
+
+    while(1){
+        struct epoll_event readyEvents[2];
+        int readyNum = epoll_wait(epfd,readyEvents,2,-1);
+        printf("epoll ready！\n");
+        for(int i=0;i<readyNum;i++){
+            if(readyEvents[i].data.fd==STDIN_FILENO){
+                bzero(buf,sizeof(buf));
+                ssize_t sret = read(STDIN_FILENO,buf,sizeof(buf));
+                if(sret == 0){
+                    send(netfd,buf,strlen(buf),0);
+                    break;
+                }
+                send(netfd,buf,strlen(buf),0);
+            }else if(readyEvents[i].data.fd==netfd){
+                bzero(buf,sizeof(buf));
+                ssize_t sret = recv(netfd,buf,2,0);
+                if(sret == 0){
+                    break;
+                }
+                printf("来自对方的消息：%s",buf);
+            }
+        }
+    }
+    close(sockfd);
+    return 0;
+}
+~~~
+
+~~~c
+///02_epoll_client.c
+#include <func.h>
+
+int main(int argc,char*argv[])
+{
+    // ./02_epoll_client 127.0.0.1 1234
+    ARGS_CHECK(argc,3);
+    int sockfd = socket(AF_INET,SOCK_STREAM,0);
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(atoi(argv[2]));
+    addr.sin_addr.s_addr = inet_addr(argv[1]);
+    int ret = connect(sockfd,(struct sockaddr *)&addr,sizeof(addr));
+    ERROR_CHECK(ret,-1,"connect");
+    printf("连接已建立！\n");
+    fd_set rdset;
+    char buf[4096] = {0};
+    while(1){
+        FD_ZERO(&rdset);
+        FD_SET(STDIN_FILENO,&rdset);
+        FD_SET(sockfd,&rdset);
+        select(sockfd+1,&rdset,NULL,NULL,NULL);
+        if(FD_ISSET(STDIN_FILENO,&rdset)){
+            bzero(buf,sizeof(buf));
+            ssize_t sret = read(STDIN_FILENO,buf,sizeof(buf));
+            send(sockfd,buf,sret,0);
+        }
+        if(FD_ISSET(sockfd,&rdset)){
+            bzero(buf,sizeof(buf));
+            ssize_t sret = recv(sockfd,buf,sizeof(buf),0);
+            if(sret == 0){
+                break;
+            }
+            printf("来自对方的消息：%s",buf);
+        }
+    }
+    close(sockfd);
+    return 0;
+}
+~~~
+
+![image-20250408094456414](./C和Linux.assets/image-20250408094456414.png)
+
+![image-20250408094526802](./C和Linux.assets/image-20250408094526802.png)
+
+客户端发来一次消息，缓冲区只要满就一直触发epoll。
+
+**只有当缓冲区数据在增加时才触发称为边缘触发**，示例：
+
+~~~c
+///04_epoll_trigger.c
+#include <func.h>
+
+int main(int argc,char*argv[])
+{
+    // ./01_epoll_sever.c 127.0.0.1 1234
+    ARGS_CHECK(argc,3);
+
+    int sockfd = socket(AF_INET,SOCK_STREAM,0);
+    struct sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(atoi(argv[2]));
+    serverAddr.sin_addr.s_addr = inet_addr(argv[1]);
+
+    int reuse = 1;
+    int ret = setsockopt(sockfd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+    ERROR_CHECK(ret,-1,"setsockopt");
+
+    ret = bind(sockfd,(struct sockaddr *)&serverAddr,sizeof(serverAddr));
+    ERROR_CHECK(ret,-1,"bind");
+
+    listen(sockfd,50);
+
+    int netfd = accept(sockfd,NULL,NULL);
+    printf("连接已建立！\n");
+
+    char buf[3]={0};
+    int epfd = epoll_create(1);//创建epoll文件对象
+    //设置监听
+    struct epoll_event events; //什么情况就绪？就绪如何处理？
+    events.events = EPOLLIN;//读就绪
+    events.data.fd = STDIN_FILENO;//设置就绪时将STDIN_FILENO放入就绪队列
+    epoll_ctl(epfd,EPOLL_CTL_ADD,STDIN_FILENO,&events);
+    events.events = EPOLLIN|EPOLLET;//设置边缘触发
+    events.data.fd = netfd;
+    epoll_ctl(epfd,EPOLL_CTL_ADD,netfd,&events);
+
+    while(1){
+        struct epoll_event readyEvents[2];
+        int readyNum = epoll_wait(epfd,readyEvents,2,-1);
+        printf("epoll ready！\n");
+        for(int i=0;i<readyNum;i++){
+            if(readyEvents[i].data.fd==STDIN_FILENO){
+                bzero(buf,sizeof(buf));
+                ssize_t sret = read(STDIN_FILENO,buf,sizeof(buf));
+                if(sret == 0){
+                    send(netfd,buf,strlen(buf),0);
+                    break;
+                }
+                send(netfd,buf,strlen(buf),0);
+            }else if(readyEvents[i].data.fd==netfd){
+                bzero(buf,sizeof(buf));
+                ssize_t sret = recv(netfd,buf,2,0);
+                if(sret == 0){
+                    break;
+                }
+                printf("来自对方的消息：%s",buf);
+            }
+        }
+    }
+    close(sockfd);
+    return 0;
+}
+~~~
+
+![image-20250408094925493](./C和Linux.assets/image-20250408094925493.png)
+
+![image-20250408094946633](./C和Linux.assets/image-20250408094946633.png)
+
+#### 用epoll实现聊天室
+
+支持断线重连、超时断开、多客户端接入
+~~~c
+///01_chatServer.c
+#include <func.h>
+typedef struct Conn_s{
+    int isAlive;
+    int netfd;
+    time_t lastActivate;
+}Conn_t;
+int main(int argc,char*argv[])
+{
+    // ./01_chatServer.c 127.0.0.1 1234
+    ARGS_CHECK(argc,3);
+
+    int sockfd = socket(AF_INET,SOCK_STREAM,0);
+    struct sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(atoi(argv[2]));
+    serverAddr.sin_addr.s_addr = inet_addr(argv[1]);
+
+    int reuse = 1;
+    int ret = setsockopt(sockfd,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+    ERROR_CHECK(ret,-1,"setsockopt");
+    ret = bind(sockfd,(struct sockaddr *)&serverAddr,sizeof(serverAddr));
+    ERROR_CHECK(ret,-1,"bind");
+    listen(sockfd,50);
+
+    int epfd = epoll_create(1);
+    struct epoll_event events;
+    events.events = EPOLLIN;
+    events.data.fd = sockfd;
+    epoll_ctl(epfd,EPOLL_CTL_ADD,sockfd,&events);
+    char buf[4096];
+    Conn_t conn[1024];
+    time_t now;
+    for(int i=0;i<1024;i++){
+        conn[i].isAlive=0;
+    }
+    int fdtoidx[1024];// fdtoidx[fd]-->conn_t[i]
+    for(int i=0;i<1024;i++){
+        fdtoidx[i]=-1;
+    }
+    int curidx = 0;
+    while(1){
+        struct epoll_event readySet[1024];
+        int readyNum = epoll_wait(epfd,readySet,1024,1000);
+        now = time(NULL);
+        printf("now = %s\n",ctime(&now));
+        for(int i=0;i<readyNum;i++){
+            if(readySet[i].data.fd == sockfd){
+                int netfd = accept(sockfd,NULL,NULL);
+                printf("id = %d,netfd = %d\n",curidx,netfd);
+                conn[curidx].isAlive=1;
+                conn[curidx].netfd = netfd;
+                conn[curidx].lastActivate = time(NULL);
+                fdtoidx[netfd] = curidx;
+                events.events = EPOLLIN;
+                events.data.fd = netfd;
+                epoll_ctl(epfd,EPOLL_CTL_ADD,netfd,&events);
+                curidx++;
+            }else{
+                int netfd = readySet[i].data.fd;
+                bzero(buf,sizeof(buf));
+                ssize_t sret = recv(netfd,buf,sizeof(buf),0);
+                if(sret == 0){//断线处理
+                    printf("one client is closed!\n");
+                    epoll_ctl(epfd,EPOLL_CTL_DEL,netfd,NULL);
+                    int idx = fdtoidx[netfd];
+                    conn[idx].isAlive = 0;
+                    fdtoidx[netfd] = -1;
+                    close(netfd);
+                    continue;
+                }
+                int idx = fdtoidx[netfd];
+                conn[idx].lastActivate = time(NULL);//活跃时间重置
+                for(int j=0;j<curidx;j++){
+                    if(conn[j].isAlive==1&&conn[j].netfd!=netfd){
+                        send(conn[j].netfd,buf,strlen(buf),0);
+                    }
+                }
+            }
+        }
+        for(int i=0;i<curidx;++i){
+            if(conn[i].isAlive == 1 && now - conn[i].lastActivate > 10){
+                epoll_ctl(epfd,EPOLL_CTL_DEL,conn[i].netfd,NULL);
+                close(conn[i].netfd);
+                conn[i].isAlive = 0;
+                fdtoidx[conn[i].netfd] = -1;
+            }
+        }
+    }
+    return 0;
+}
+~~~
+
+~~~c
+///02_chatClient.c
+#include <func.h>
+
+int main(int argc,char*argv[])
+{
+    // ./02_chatClient 127.0.0.1 1234
+    ARGS_CHECK(argc,3);
+    int sockfd = socket(AF_INET,SOCK_STREAM,0);
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(atoi(argv[2]));
+    addr.sin_addr.s_addr = inet_addr(argv[1]);
+    int ret = connect(sockfd,(struct sockaddr *)&addr,sizeof(addr));
+    ERROR_CHECK(ret,-1,"connect");
+    printf("connected\n");
+    fd_set rdset;
+    char buf[4096] = {0};
+    while(1){
+        FD_ZERO(&rdset);
+        FD_SET(STDIN_FILENO,&rdset);
+        FD_SET(sockfd,&rdset);
+        select(sockfd+1,&rdset,NULL,NULL,NULL);
+        if(FD_ISSET(STDIN_FILENO,&rdset)){
+            bzero(buf,sizeof(buf));
+            ssize_t sret = read(STDIN_FILENO,buf,sizeof(buf));
+            send(sockfd,buf,sret,0);
+        }
+        if(FD_ISSET(sockfd,&rdset)){
+            bzero(buf,sizeof(buf));
+            ssize_t sret = recv(sockfd,buf,sizeof(buf),0);
+            if(sret == 0){
+                printf("disconnected!\n");
+                break;
+            }
+            printf("recv:%s",buf);
+        }
+    }
+    close(sockfd);
+    return 0;
+}
+~~~
+
+### 服务器框架
+
+#### 进程或线程的模型
+
+#### 事件驱动的模型
 
