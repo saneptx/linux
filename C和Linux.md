@@ -8874,3 +8874,203 @@ int main(int argc,char*argv[])
 
 #### 事件驱动的模型
 
+### 进程池
+
+~~~c
+#include <sys/types.h>
+#include <sys/socket.h>
+
+int socketpair(int domain, int type, int protocol, int sv[2]);
+/*
+功能：
+	socketpair是一个用于创建一对已连接的套接字的系统调用，常用于进程间通信（IPC），特别是在父子进程之间传递数据的场景中。与管道不同sockerpair可以实	现全双工通信。	配合sendmsg和recvmsg可以传递文件描述符。
+参数：
+	domain:协议栈，常用AF_UNIX或AF_LOCAL用于本地通信
+	type:套接字类型
+		SOCK_STREAM:面向连接(tcp)。
+		SOCK_DGRAM:无连接(UDP)。
+	protocol:通常设为0，表示默认协议。
+	sv[2]:输入参数，保存创建的一对socket文件描述符。sv[0]和sv[1]相互连接。
+返回值:
+	成功返回 0，sv[0] 和 sv[1] 中分别保存两个 socket 的文件描述符。
+	失败返回 -1，并设置 errno。
+*/
+~~~
+
+~~~c
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/socket.h>
+
+int main() {
+    int sv[2]; // socket pair
+
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == -1) {
+        perror("socketpair");
+        exit(1);
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        exit(1);
+    } else if (pid == 0) {
+        // 子进程
+        close(sv[0]);  // 关闭不使用的一端
+        char buf[100];
+        read(sv[1], buf, sizeof(buf));
+        printf("Child received: %s\n", buf);
+
+        write(sv[1], "Hello from child", 17);
+        close(sv[1]);
+    } else {
+        // 父进程
+        close(sv[1]);  // 关闭不使用的一端
+        write(sv[0], "Hello from parent", 18);
+
+        char buf[100];
+        read(sv[0], buf, sizeof(buf));
+        printf("Parent received: %s\n", buf);
+
+        close(sv[0]);
+    }
+
+    return 0;
+}
+~~~
+
+~~~c
+#include <sys/types.h>
+#include <sys/socket.h>
+
+ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags);
+/*
+功能：
+	向套接字发送一条带有数据和控制信息的消息（例如传文件描述符）。
+参数：
+	sockfd:套接字文件描述符，一般由 socket()、socketpair() 或 accept() 获得。
+	*msg:
+		struct msghdr {
+    		void         *msg_name;       // 目标地址（对 socketpair/UNIX 域通常为 NULL）
+            socklen_t     msg_namelen;    // 地址长度通常为0
+            struct iovec *msg_iov;        // 数据缓冲区数组
+            int           msg_iovlen;     // 数据缓冲区数量
+            void         *msg_control;    // 控制消息缓冲区（用于传递文件描述符）
+            socklen_t     msg_controllen; // 控制消息长度
+            int           msg_flags;      // 接收标志（recvmsg 时用）
+        };
+        struct iovec{
+        	void *iov_base;
+        	size_t lov_len;
+        }
+        struct cmsghdr {
+            size_t cmsg_len;	//整个结构体的实际长度
+            int    cmsg_level;  //发送文件对象时cmsg_level=SOL_SOCKET
+            int    cmsg_type;   //发送文件对象时type=SCM_RIGHTS
+            unsigned char cmsg_data[]; //若干个int，存放文件对象的文件描述符
+        };
+     flags:	通常为 0，也可以是如 MSG_DONTWAIT 的标志位。
+返回值：
+	返回实际发送的字节数（不包括控制信息）。
+	返回 -1 表示出错。
+*/
+ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags);
+/*
+功能：
+	recvmsg() 是 recv() 的高级版本，可以接收消息数据+控制信息（比如文件描述符）。
+参数：
+	sockfd:套接字文件描述符。
+	msg:接收缓冲区及控制信息配置。
+	flags:可为0或MSG_WAITALL等。
+返回值：
+	返回 0 表示连接关闭。
+	返回 -1 表示出错。
+*/
+~~~
+
+#### 编写发送和接收文件描述符的send_fd()函数和recv_fd()函数
+
+~~~c
+int send_fd(int sockfd, int fd_to_send) {
+    struct msghdr msg;
+    struct iovec iov[1];
+    char buf[1];  // 需要发送至少1字节数据
+    
+    // 设置要发送的数据
+    buf[0] = '0';  // 任意值，必须有内容
+    iov[0].iov_base = buf;
+    iov[0].iov_len = 1;
+    
+    // 设置消息头
+    msg.msg_name = NULL;
+    msg.msg_namelen = 0;
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
+    
+    // 准备发送文件描述符的控制信息
+    union {
+        struct cmsghdr cm;
+        char control[CMSG_SPACE(sizeof(int))];
+    } control_un;
+    
+    msg.msg_control = control_un.control;
+    msg.msg_controllen = sizeof(control_un.control);
+    
+    struct cmsghdr *cmptr = CMSG_FIRSTHDR(&msg);
+    cmptr->cmsg_len = CMSG_LEN(sizeof(int));
+    cmptr->cmsg_level = SOL_SOCKET;
+    cmptr->cmsg_type = SCM_RIGHTS;
+    *((int *)CMSG_DATA(cmptr)) = fd_to_send;
+    
+    return sendmsg(sockfd, &msg, 0);
+}
+~~~
+
+~~~c
+int recv_fd(int sockfd) {
+    struct msghdr msg;
+    struct iovec iov[1];
+    char buf[1];
+    int fd = -1;
+    
+    // 设置接收缓冲区
+    iov[0].iov_base = buf;
+    iov[0].iov_len = 1;
+    
+    // 设置消息头
+    msg.msg_name = NULL;
+    msg.msg_namelen = 0;
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
+    
+    // 准备接收控制信息
+    union {
+        struct cmsghdr cm;
+        char control[CMSG_SPACE(sizeof(int))];
+    } control_un;
+    
+    msg.msg_control = control_un.control;
+    msg.msg_controllen = sizeof(control_un.control);
+    
+    // 接收消息
+    if (recvmsg(sockfd, &msg, 0) <= 0) {
+        return -1;
+    }
+    
+    // 处理控制信息
+    struct cmsghdr *cmptr = CMSG_FIRSTHDR(&msg);
+    if (cmptr != NULL && 
+        cmptr->cmsg_len == CMSG_LEN(sizeof(int)) &&
+        cmptr->cmsg_level == SOL_SOCKET && 
+        cmptr->cmsg_type == SCM_RIGHTS) {
+        fd = *((int *)CMSG_DATA(cmptr));
+    } else {
+        fd = -1;
+    }
+    
+    return fd;
+}
+~~~
+
