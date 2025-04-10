@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "func.h": "c",
-        "head.h": "c"
+        "head.h": "c",
+        "threadpool.h": "c"
     }
 }
