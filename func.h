@@ -26,6 +26,7 @@
 #include <netdb.h>
 #include <strings.h>
 #include <sys/epoll.h>
+#include <sys/sendfile.h>
 #define ARGS_CHECK(argc, n) {               \
    if (argc != n) {                        \
           fprintf(stderr, "ERROR: expected %d arguments.\n", n);      \

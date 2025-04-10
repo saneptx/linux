@@ -1,14 +1,14 @@
 #include"head.h"
 
-int send_fd(int sockfd, int fd_to_send) {
+int send_fd(int sockfd, int fd_to_send,int exitFlag) {
     struct msghdr msg;
     struct iovec iov[1];
-    char buf[1];  // 需要发送至少1字节数据
+    //char buf[1];  // 需要发送至少1字节数据
     
     // 设置要发送的数据
-    buf[0] = '0';  // 任意值，必须有内容
-    iov[0].iov_base = buf;
-    iov[0].iov_len = 1;
+    //buf[0] = '0';  // 任意值，必须有内容
+    iov[0].iov_base = &exitFlag;//退出标志
+    iov[0].iov_len = sizeof(exitFlag);
     
     // 设置消息头
     msg.msg_name = NULL;
@@ -34,15 +34,14 @@ int send_fd(int sockfd, int fd_to_send) {
     
     return sendmsg(sockfd, &msg, 0);
 }
-int recv_fd(int sockfd) {
+int recv_fd(int sockfd,int *pexitFlag) {
     struct msghdr msg;
     struct iovec iov[1];
-    char buf[1];
     int fd = -1;
     
     // 设置接收缓冲区
-    iov[0].iov_base = buf;
-    iov[0].iov_len = 1;
+    iov[0].iov_base = pexitFlag;
+    iov[0].iov_len = sizeof(int);
     
     // 设置消息头
     msg.msg_name = NULL;

@@ -56,42 +56,77 @@ typedef struct train_s{
 //     return 0;
 // }
 
-//4.0 添加进度条
+//4.0 添加进度条 将recv()改为recvn()
+int recvn(int sockfd,void *buf,long total){//防止粘包
+    char *p = (char*)buf;
+    long cursize = 0;
+    while(cursize<total){
+        size_t sret = recv(sockfd,p+cursize,total-cursize,0);
+        cursize+=sret;
+    }
+    return 0;
+}
+// int recvFile(int sockfd){
+//     //获取文件名
+//     char filename[4096] = {0};
+//     train_t train;
+//     recvn(sockfd,&train.length,sizeof(train.length));
+//     recvn(sockfd,train.data,train.length);
+//     memcpy(filename,train.data,train.length);
+//     //获取文件大小
+//     off_t filesize;
+//     recvn(sockfd,&train.length,sizeof(train.length));
+//     recvn(sockfd,train.data,train.length);
+//     memcpy(&filesize,train.data,train.length);
+//     // printf("filesize=%ld\n",filesize);
+//     off_t cursize = 0;
+//     off_t lastsize = 0;//上次printf的时候的文件大小
+//     off_t slice = filesize/10000;
+//     //接收并写入文件
+//     int fd = open(filename,O_CREAT|O_RDWR|O_TRUNC,0666);
+//     while(1){
+//         recvn(sockfd,&train.length,sizeof(train.length));
+//         if(train.length == 0){
+//             break;
+//         }
+//         cursize += train.length;
+//         recvn(sockfd,train.data,train.length);
+//         if(write(fd,train.data,train.length)==-1){
+//             break;
+//         }
+//         if(cursize-lastsize > slice){
+//             printf("%5.2lf%%\r",cursize*100.0/filesize);
+//             lastsize = cursize;
+//         }
+//         fflush(stdout);
+//     }
+//     printf("100.00%%\n");
+//     printf("Download Success!\n");
+//     close(fd);
+//     return 0;
+// }
+
+//5.0 接收大火车
 int recvFile(int sockfd){
     //获取文件名
     char filename[4096] = {0};
     train_t train;
-    recv(sockfd,&train.length,sizeof(train.length),MSG_WAITALL);
-    recv(sockfd,train.data,train.length,MSG_WAITALL);
+    recvn(sockfd,&train.length,sizeof(train.length));
+    recvn(sockfd,train.data,train.length);
     memcpy(filename,train.data,train.length);
     //获取文件大小
     off_t filesize;
-    recv(sockfd,&train.length,sizeof(train.length),MSG_WAITALL);
-    recv(sockfd,train.data,train.length,MSG_WAITALL);
+    recvn(sockfd,&train.length,sizeof(train.length));
+    recvn(sockfd,train.data,train.length);
     memcpy(&filesize,train.data,train.length);
-    // printf("filesize=%ld\n",filesize);
-    off_t cursize = 0;
-    off_t lastsize = 0;//上次printf的时候的文件大小
-    off_t slice = filesize/10000;
+    
     //接收并写入文件
     int fd = open(filename,O_CREAT|O_RDWR|O_TRUNC,0666);
-    while(1){
-        recv(sockfd,&train.length,sizeof(train.length),MSG_WAITALL);
-        if(train.length == 0){
-            break;
-        }
-        cursize += train.length;
-        recv(sockfd,train.data,train.length,MSG_WAITALL);
-        if(write(fd,train.data,train.length)==-1){
-            break;
-        }
-        if(cursize-lastsize > slice){
-            printf("%5.2lf%%\r",cursize*100.0/filesize);
-            lastsize = cursize;
-        }
-        fflush(stdout);
-    }
-    printf("100.00%%\n");
+    ftruncate(fd,filesize);
+    char *p = (char*)mmap(NULL,filesize,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
+    ERROR_CHECK(p,MAP_FAILED,"mmap");
+    recvn(sockfd,p,filesize);
+    munmap(p,filesize);
     printf("Download Success!\n");
     close(fd);
     return 0;

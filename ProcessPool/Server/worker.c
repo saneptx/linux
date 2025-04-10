@@ -18,7 +18,12 @@ int makeWorker(int workerNum,workerdata_t* workerArr){
 int workLoop(int pipesockfd){
     while(1){
         int netfd;
-        netfd = recv_fd(pipesockfd);//接受任务
+        int exitFlag = 0;
+        netfd = recv_fd(pipesockfd,&exitFlag);//接受任务
+        if(exitFlag==1){
+            printf("going exit!\n");
+            exit(0);
+        }
         printf("begin work!\n");
         transFile(netfd);
         close(netfd);
