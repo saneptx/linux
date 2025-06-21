@@ -1,6 +1,7 @@
 #include"worker.h"
 #include"taskQueue.h"
 #include"threadPool.h"
+#include <signal.h>
 int exitPipe[2];
 void handler(int signum){
     printf("signum = %d\n",signum);
@@ -35,7 +36,7 @@ int main(int argc,char *argv[]){
                 int netfd = accept(sockfd,NULL,NULL);
                 printf("I got one task!\n");
                 pthread_mutex_lock(&threadPool.mutex);
-                enQueue(&threadPool.taskQueue,netfd);
+                enQueue(&threadPool.taskQueue,netfd);   
                 printf("I am master,I send netfd=%d\n",netfd);
                 pthread_cond_signal(&threadPool.cond);
                 pthread_mutex_unlock(&threadPool.mutex);
